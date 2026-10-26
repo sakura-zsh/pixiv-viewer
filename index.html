@@ -70,6 +70,14 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
 .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
 .stage{position:relative;background:color-mix(in srgb,var(--muted) 8%,var(--panel));display:grid;place-items:center;min-height:300px}
 .stage img{display:block;max-width:100%;max-height:76vh;width:auto;height:auto;object-fit:contain}
+.stage.noimg{display:flex;flex-direction:column;gap:12px;padding:64px 28px;text-align:center}
+.stage.noimg .big{font-size:15px;font-weight:650;color:var(--fg)}
+.stage.noimg .hint{font-size:13px;color:var(--muted);max-width:36em;margin:0 auto;line-height:1.75}
+.stage.noimg a.cta{
+  display:inline-block;margin:2px auto 0;padding:9px 18px;border-radius:10px;
+  background:var(--accent);color:var(--accent-fg);font-size:13.5px;font-weight:600;
+  text-decoration:none;
+}
 .stage .spinner{
   position:absolute;width:26px;height:26px;border:2.5px solid color-mix(in srgb,var(--muted) 30%,transparent);
   border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
@@ -314,17 +322,31 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
 
     var multi = state.pageCount > 1;
 
-    el.result.innerHTML =
-      '<div class="card">' +
-        '<div class="stage" id="stage">' +
+    /* 中继对个别作品拿不到 /pages（pixiv 匿名访问受限），此时不能留一片空白，
+       要给一个能去处：官网作品页（需自备代理）。 */
+    var hasImg = (state.regular || []).concat(state.original || []).some(function(u){ return !!u; });
+
+    var stageHtml = hasImg
+      ? '<div class="stage" id="stage">' +
           '<div class="spinner" id="spin"></div>' +
           (multi
             ? '<button class="nav prev" id="prev" aria-label="上一张">‹</button>' +
               '<button class="nav next" id="next" aria-label="下一张">›</button>' +
               '<div class="counter" id="counter"></div>'
             : '') +
-        '</div>' +
-        (multi ? '<div class="thumbs" id="thumbs"></div>' : '') +
+        "</div>"
+      : '<div class="stage noimg" id="stage">' +
+          '<p class="big">取不到图片地址</p>' +
+          '<p class="hint">作品信息已读到，但 pixiv 没有把图床路径下发给匿名请求。' +
+            '这类作品在官网登录后可看。</p>' +
+          '<a class="cta" href="https://www.pixiv.net/artworks/' + esc(state.pid) + '" target="_blank" rel="noopener noreferrer">在 Pixiv 官网打开</a>' +
+          '<p class="hint">访问官网需要自备代理。</p>' +
+        "</div>";
+
+    el.result.innerHTML =
+      '<div class="card">' +
+        stageHtml +
+        (multi && hasImg ? '<div class="thumbs" id="thumbs"></div>' : '') +
         '<div class="meta">' +
           '<h2 class="title">' + esc(state.title || "(无标题)") + "</h2>" +
           '<p class="author">' +
@@ -336,33 +358,40 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
           (tags ? '<div class="tags">' + tags + "</div>" : "") +
           '<div class="actions">' +
             '<a href="https://www.pixiv.net/artworks/' + esc(state.pid) + '" target="_blank" rel="noopener noreferrer">在 Pixiv 打开</a>' +
-            '<button id="toggleOrig">查看原图</button>' +
+            (hasImg ? '<button id="toggleOrig">查看原图</button>' : '') +
             '<button id="copyId">复制 ID</button>' +
-            '<a id="dlLink" href="#" target="_blank" rel="noopener noreferrer">下载</a>' +
+            (hasImg ? '<a id="dlLink" href="#" target="_blank" rel="noopener noreferrer">下载</a>' : '') +
             '<span class="pid">当前 ID：<b id="pidText"></b></span>' +
           "</div>" +
         "</div>" +
       "</div>";
 
     var toggle = document.getElementById("toggleOrig");
-    toggle.onclick = function(){
-      state.showOriginal = !state.showOriginal;
-      toggle.textContent = state.showOriginal ? "看预览图" : "查看原图";
-      toggle.classList.toggle("on", state.showOriginal);
-      showPage(state.viewing);
-    };
+    if(toggle){
+      toggle.onclick = function(){
+        state.showOriginal = !state.showOriginal;
+        toggle.textContent = state.showOriginal ? "看预览图" : "查看原图";
+        toggle.classList.toggle("on", state.showOriginal);
+        showPage(state.viewing);
+      };
+    }
 
     document.getElementById("copyId").onclick = function(){
       copy(state.pid + (state.pageCount > 1 ? "-" + (state.viewing + 1) : ""), this);
     };
 
-    if(multi){
+    if(multi && hasImg){
       document.getElementById("prev").onclick = function(){ showPage(state.viewing - 1); };
       document.getElementById("next").onclick = function(){ showPage(state.viewing + 1); };
       buildThumbs();
     }
 
-    showPage(state.viewing);
+    if(hasImg){
+      showPage(state.viewing);
+    } else {
+      var pt = document.getElementById("pidText");
+      if(pt) pt.textContent = state.pid;
+    }
   }
 
   function buildThumbs(){
