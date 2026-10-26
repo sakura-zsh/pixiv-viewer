@@ -290,6 +290,13 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
       return relayGet(base + "/pages").then(function(pg){
         var b = (meta && meta.body) || {};
         var list = (pg && pg.body) || [];
+
+        /* 个别作品（约 1/10）pixiv 不向匿名请求下发 /pages，返回
+           {"error":true,"body":[]}。这条走 touch 接口，一次请求拿全。 */
+        if(pg && pg.error || !list.length){
+          return fetchViaTouch(pid);
+        }
+
         function pick(k){
           return list.map(function(it){ return (it.urls || {})[k] || ""; });
         }
@@ -311,6 +318,52 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
     });
   }
 
+  /* 备用出口：pixiv 的 touch 接口。实测对 /pages 被拒的作品仍能拿到图床地址，
+     代价是单页作品只给 master1200（原图扩展名无法推导，可能是 png），
+     所以这一路统一用 1200px 预览，不假装有原图。 */
+  function fetchViaTouch(pid){
+    return relayGet("https://www.pixiv.net/touch/ajax/illust/details?illust_id=" + encodeURIComponent(pid))
+      .then(function(res){
+        if(res && res.error){
+          var e = new Error(res.message || "作品不存在");
+          e.notFound = true;
+          throw e;
+        }
+        var b = (res && res.body) || {};
+        var det = b.illust_details || {};
+        var auth = b.author_details || {};
+        var manga = det.manga_a;
+        var regular = [], original = [], small = [];
+
+        if(Object.prototype.toString.call(manga) === "[object Array]" && manga.length){
+          manga.forEach(function(it){
+            regular.push(it.url || "");
+            original.push(it.url_big || it.url || "");
+            small.push(it.url_small || it.url || "");
+          });
+        } else if(det.url){
+          regular.push(det.url);
+          original.push(det.url);
+          small.push(det.url);
+        }
+
+        return {
+          via: "relay-touch",
+          body: {
+            title: det.title || "",
+            userName: auth.user_name || "",
+            userId: auth.user_id || "",
+            pageCount: det.page_count || regular.length || 1,
+            xRestrict: det.x_restrict || 0,
+            tags: Object.prototype.toString.call(det.tags) === "[object Array]" ? det.tags : []
+          },
+          pages: original,
+          regular: regular,
+          small: small
+        };
+      });
+  }
+
   /* ---------- 渲染 ---------- */
 
   function renderMeta(){
@@ -325,6 +378,7 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
     /* 中继对个别作品拿不到 /pages（pixiv 匿名访问受限），此时不能留一片空白，
        要给一个能去处：官网作品页（需自备代理）。 */
     var hasImg = (state.regular || []).concat(state.original || []).some(function(u){ return !!u; });
+    var hasOrig = (state.original || []).some(function(u, i){ return !!u && u !== (state.regular || [])[i]; });
 
     var stageHtml = hasImg
       ? '<div class="stage" id="stage">' +
@@ -337,8 +391,8 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
         "</div>"
       : '<div class="stage noimg" id="stage">' +
           '<p class="big">取不到图片地址</p>' +
-          '<p class="hint">作品信息已读到，但 pixiv 没有把图床路径下发给匿名请求。' +
-            '这类作品在官网登录后可看。</p>' +
+          '<p class="hint">作品信息已读到，但 pixiv 没有向匿名请求下发任何图床路径，' +
+            '两条中继通道都没拿到。这类作品通常需要在官网登录后查看。</p>' +
           '<a class="cta" href="https://www.pixiv.net/artworks/' + esc(state.pid) + '" target="_blank" rel="noopener noreferrer">在 Pixiv 官网打开</a>' +
           '<p class="hint">访问官网需要自备代理。</p>' +
         "</div>";
@@ -358,7 +412,7 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
           (tags ? '<div class="tags">' + tags + "</div>" : "") +
           '<div class="actions">' +
             '<a href="https://www.pixiv.net/artworks/' + esc(state.pid) + '" target="_blank" rel="noopener noreferrer">在 Pixiv 打开</a>' +
-            (hasImg ? '<button id="toggleOrig">查看原图</button>' : '') +
+            (hasImg && hasOrig ? '<button id="toggleOrig">查看原图</button>' : '') +
             '<button id="copyId">复制 ID</button>' +
             (hasImg ? '<a id="dlLink" href="#" target="_blank" rel="noopener noreferrer">下载</a>' : '') +
             '<span class="pid">当前 ID：<b id="pidText"></b></span>' +
@@ -555,7 +609,7 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
 
         setStatus("");
         renderMeta();
-        if(d.via === "relay"){
+        if(String(d.via || "").indexOf("relay") === 0){
           setStatus("元数据经中继读取（Worker 出口被 pixiv 拒绝，已自动降级）。", "warn");
           setTimeout(function(){
             if(el.status.textContent.indexOf("中继读取") >= 0) setStatus("");
