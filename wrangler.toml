@@ -1,0 +1,8 @@
+name = "pixiv-viewer"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# 部署：npx wrangler deploy
+#
+# 如需配置 pixiv cookie（部分作品需要登录态才给图）：
+#   npx wrangler secret put PIXIV_COOKIE

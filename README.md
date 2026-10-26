@@ -20,16 +20,28 @@
 
 ### 1. 后端（Cloudflare Worker）
 
+**方式 A：Dashboard 粘贴（最快）**
+
 1. 打开 [Cloudflare Dashboard](https://dash.cloudflare.com/) → **Workers & Pages** → **Create** → **Worker**
 2. 名字随意，创建后点 **Edit code**
 3. 把 `worker.js` 的内容整个粘进去，覆盖模板
 4. **Deploy**，记下分配到的地址，形如 `https://pixiv-viewer.你的子域.workers.dev`
 
-可选：如果取图返回 403 或"非 JSON"（出口 IP 被风控），在 Worker 的 **Settings → Variables** 里加一个 Secret：
+**方式 B：wrangler 一条命令**
 
+```bash
+npx wrangler deploy
 ```
-PIXIV_COOKIE = <浏览器里 pixiv 的完整 Cookie 串>
+
+仓库里已有 `wrangler.toml`，无需额外配置。
+
+可选：如果取图返回 403 或"非 JSON"（出口 IP 被风控），给 Worker 加一个 Secret：
+
+```bash
+npx wrangler secret put PIXIV_COOKIE
 ```
+
+值填浏览器里 pixiv 的完整 Cookie 串。
 
 ### 2. 前端（任选其一）
 
