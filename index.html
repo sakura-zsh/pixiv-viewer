@@ -251,6 +251,58 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
     return state.apiBase + "/img?u=" + encodeURIComponent(u);
   }
 
+  /* ---------- 元数据兜底通道 ----------
+     Cloudflare 的出口 IP 被 pixiv 按机房 IP 整段拒绝（ajax 一律 403），
+     但 r.jina.ai 的出口没有被拒，而且它会回显 Origin 放行 CORS，
+     所以浏览器可以直连它读取 pixiv 的原始 JSON。
+     图片不走这条路（它只返回文本），图片仍由 Worker 带伪装 Referer 转发。 */
+  var RELAY = "https://r.jina.ai/";
+
+  function relayGet(target){
+    return fetch(RELAY + target, {
+      cache: "no-store",
+      headers: { "x-return-format": "text" }
+    }).then(function(r){
+      if(!r.ok) throw new Error("中继返回 HTTP " + r.status);
+      return r.text();
+    }).then(function(txt){
+      try { return JSON.parse(txt); }
+      catch(e){ throw new Error("中继返回的不是 JSON"); }
+    });
+  }
+
+  function fetchViaRelay(pid){
+    var base = "https://www.pixiv.net/ajax/illust/" + encodeURIComponent(pid);
+    return relayGet(base).then(function(meta){
+      if(meta && meta.error){
+        var e = new Error(meta.message || "作品不存在");
+        e.notFound = true;
+        throw e;
+      }
+      return relayGet(base + "/pages").then(function(pg){
+        var b = (meta && meta.body) || {};
+        var list = (pg && pg.body) || [];
+        function pick(k){
+          return list.map(function(it){ return (it.urls || {})[k] || ""; });
+        }
+        return {
+          via: "relay",
+          body: {
+            title: b.illustTitle || b.title || "",
+            userName: b.userName || "",
+            userId: b.userId || "",
+            pageCount: b.pageCount || list.length || 1,
+            xRestrict: b.xRestrict || 0,
+            tags: ((b.tags && b.tags.tags) || []).map(function(t){ return t.tag; })
+          },
+          pages: pick("original"),
+          regular: pick("regular"),
+          small: pick("small")
+        };
+      });
+    });
+  }
+
   /* ---------- 渲染 ---------- */
 
   function renderMeta(){
@@ -423,7 +475,7 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
     }
 
     if(!state.apiBase){
-      setStatus("还没有配置后端地址。点右上角 <b>⚙</b> 填入 Cloudflare Worker 地址后再查询。", "err");
+      setStatus("还没有配置图片代理地址。点右上角 <b>⚙</b> 填入 Cloudflare Worker 地址后再查询。", "err");
       return;
     }
 
@@ -432,20 +484,30 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
     setStatus("正在查询作品 " + esc(parsed.pid) + " …");
     el.go.disabled = true;
 
-    fetch(state.apiBase + "/api/illust/" + encodeURIComponent(parsed.pid), { cache: "no-store" })
-      .then(function(r){
-        return r.json().catch(function(){
-          throw new Error("后端返回了非 JSON（HTTP " + r.status + "）");
-        }).then(function(d){
-          if(!r.ok || d.error){
-            var e = new Error(d.message || ("HTTP " + r.status));
-            e.status = r.status;
-            e.notFound = d.notFound || r.status === 404;
-            throw e;
-          }
-          return d;
+    /* 主通道：Worker 的 /api/illust（带 10 分钟缓存，最快）。
+       失败则降级到浏览器直连中继，两者都不行才报错。 */
+    var viaWorker = function(){
+      return fetch(state.apiBase + "/api/illust/" + encodeURIComponent(parsed.pid), { cache: "no-store" })
+        .then(function(r){
+          return r.json().catch(function(){
+            throw new Error("后端返回了非 JSON（HTTP " + r.status + "）");
+          }).then(function(d){
+            if(!r.ok || d.error){
+              var e = new Error(d.message || ("HTTP " + r.status));
+              e.status = r.status;
+              e.notFound = d.notFound || r.status === 404;
+              throw e;
+            }
+            d.via = d.via || "worker";
+            return d;
+          });
         });
-      })
+    };
+
+    viaWorker().catch(function(err){
+      if(err && err.notFound) throw err;      // 作品确实不存在，不必再兜底
+      return fetchViaRelay(parsed.pid);
+    })
       .then(function(d){
         var b = d.body || {};
         state.title = b.title || "";
@@ -464,6 +526,12 @@ button.primary:disabled{opacity:.55;cursor:default;filter:none}
 
         setStatus("");
         renderMeta();
+        if(d.via === "relay"){
+          setStatus("元数据经中继读取（Worker 出口被 pixiv 拒绝，已自动降级）。", "warn");
+          setTimeout(function(){
+            if(el.status.textContent.indexOf("中继读取") >= 0) setStatus("");
+          }, 4000);
+        }
       })
       .catch(function(err){
         var msg = String((err && err.message) || err);
