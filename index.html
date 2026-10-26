@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Pixiv 作品查看器</title>
+<style>
+:root{
+  --bg:#f5f6f8; --panel:#fff; --border:#e2e6ed; --fg:#15181e; --muted:#6b7280;
+  --accent:#3b6cf0; --accent-fg:#fff; --danger:#cf4040; --ok:#1a8a52; --warn:#b8730b;
+  --radius:14px; --shadow:0 1px 2px rgba(16,24,40,.05),0 10px 28px -14px rgba(16,24,40,.22);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0d1015; --panel:#151a22; --border:#252c37; --fg:#e7ecf3; --muted:#8b98aa;
+    --accent:#5b86ff; --accent-fg:#0a0d12; --danger:#ff6b6b; --ok:#3ecf8e; --warn:#e0a53c;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 14px 36px -18px rgba(0,0,0,.75);
+  }
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+}
+.wrap{max-width:1080px;margin:0 auto;padding:32px 20px 72px}
+
+.head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:26px}
+h1{margin:0 0 6px;font-size:22px;font-weight:650;letter-spacing:-.01em}
+.sub{margin:0;color:var(--muted);font-size:13.5px}
+.sub code,.hint code{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+  background:color-mix(in srgb,var(--muted) 14%,transparent);padding:1px 5px;border-radius:5px;
+}
+.icon-btn{
+  flex:0 0 auto;width:36px;height:36px;border-radius:10px;border:1px solid var(--border);
+  background:var(--panel);color:var(--muted);cursor:pointer;display:grid;place-items:center;
+  transition:color .15s,border-color .15s;font-size:15px;
+}
+.icon-btn:hover{color:var(--fg);border-color:var(--muted)}
+
+form.search{display:flex;gap:10px;margin-bottom:14px}
+input[type=text]{
+  flex:1;min-width:0;height:46px;padding:0 15px;border-radius:11px;
+  border:1px solid var(--border);background:var(--panel);color:var(--fg);
+  font-size:15px;font-family:inherit;outline:none;transition:border-color .15s,box-shadow .15s;
+}
+input[type=text]::placeholder{color:var(--muted);opacity:.85}
+input[type=text]:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 18%,transparent)}
+button.primary{
+  height:46px;padding:0 24px;border:0;border-radius:11px;background:var(--accent);color:var(--accent-fg);
+  font-size:15px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;
+  transition:filter .15s,transform .06s;
+}
+button.primary:hover{filter:brightness(1.07)}
+button.primary:active{transform:translateY(1px)}
+button.primary:disabled{opacity:.55;cursor:default;filter:none}
+
+.hint{color:var(--muted);font-size:12.5px;margin:0 0 22px}
+
+.status{display:none;padding:13px 16px;border-radius:11px;font-size:13.5px;margin-bottom:20px;border:1px solid var(--border);background:var(--panel)}
+.status.show{display:block}
+.status.err{border-color:color-mix(in srgb,var(--danger) 45%,var(--border));color:var(--danger)}
+.status.warn{border-color:color-mix(in srgb,var(--warn) 45%,var(--border));color:var(--warn)}
+.status.ok{border-color:color-mix(in srgb,var(--ok) 40%,var(--border));color:var(--ok)}
+.status b{font-weight:650}
+
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.stage{position:relative;background:color-mix(in srgb,var(--muted) 8%,var(--panel));display:grid;place-items:center;min-height:300px}
+.stage img{display:block;max-width:100%;max-height:76vh;width:auto;height:auto;object-fit:contain}
+.stage .spinner{
+  position:absolute;width:26px;height:26px;border:2.5px solid color-mix(in srgb,var(--muted) 30%,transparent);
+  border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.nav{
+  position:absolute;top:50%;transform:translateY(-50%);width:42px;height:42px;border-radius:50%;
+  border:1px solid var(--border);background:color-mix(in srgb,var(--panel) 88%,transparent);
+  backdrop-filter:blur(8px);color:var(--fg);cursor:pointer;display:grid;place-items:center;
+  font-size:19px;line-height:1;transition:opacity .15s;
+}
+.nav:hover{opacity:.78}
+.nav[disabled]{opacity:.25;cursor:default}
+.nav.prev{left:12px}
+.nav.next{right:12px}
+.counter{
+  position:absolute;right:12px;bottom:12px;padding:3px 10px;border-radius:999px;font-size:12px;
+  background:rgba(0,0,0,.6);color:#fff;font-variant-numeric:tabular-nums;letter-spacing:.02em;
+}
+
+.meta{padding:20px 22px}
+.title{margin:0 0 4px;font-size:17px;font-weight:640;line-height:1.4;word-break:break-word}
+.author{margin:0 0 14px;color:var(--muted);font-size:13.5px}
+.author a{color:inherit;text-decoration:none;border-bottom:1px solid transparent}
+.author a:hover{border-bottom-color:currentColor}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.tag{font-size:12px;padding:2px 9px;border-radius:999px;color:var(--muted);background:color-mix(in srgb,var(--muted) 12%,transparent)}
+.tag.r18{color:var(--danger);background:color-mix(in srgb,var(--danger) 14%,transparent);font-weight:600}
+
+.actions{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+.actions a,.actions button{
+  font:inherit;font-size:13px;padding:7px 14px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--border);background:transparent;color:var(--fg);text-decoration:none;
+  transition:border-color .15s,background .15s;
+}
+.actions a:hover,.actions button:hover{border-color:var(--muted);background:color-mix(in srgb,var(--muted) 8%,transparent)}
+.actions button.on{border-color:var(--accent);color:var(--accent)}
+.actions .pid{
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;color:var(--muted);
+  padding:7px 0;margin-left:auto;
+}
+.actions .pid b{color:var(--fg);font-weight:600}
+
+.thumbs{display:flex;gap:8px;padding:14px 22px 18px;overflow-x:auto;scrollbar-width:thin;border-top:1px solid var(--border)}
+.thumbs img{
+  width:58px;height:58px;object-fit:cover;border-radius:8px;cursor:pointer;flex:0 0 auto;
+  border:2px solid transparent;opacity:.6;transition:opacity .15s,border-color .15s;background:var(--border);
+}
+.thumbs img:hover{opacity:.92}
+.thumbs img.on{border-color:var(--accent);opacity:1}
+
+.sheet{display:none;margin-bottom:22px}
+.sheet.show{display:block}
+.sheet .card{padding:18px 20px}
+.sheet label{display:block;font-size:13px;font-weight:600;margin-bottom:7px}
+.sheet .row{display:flex;gap:9px;margin-bottom:12px}
+.sheet input{height:40px;font-size:13.5px}
+.sheet .note{font-size:12.5px;color:var(--muted);margin:0;line-height:1.7}
+
+@media (max-width:620px){
+  .wrap{padding:22px 14px 56px}
+  h1{font-size:19px}
+  form.search{flex-wrap:wrap}
+  button.primary{width:100%}
+  .meta{padding:16px}
+  .thumbs{padding:12px 16px 16px}
+  .actions .pid{margin-left:0;width:100%}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="head">
+    <div>
+      <h1>Pixiv 作品查看器</h1>
+      <p class="sub">输入作品 ID、<code>pid-页码</code>，或直接粘贴 pixiv 链接</p>
+    </div>
+    <button class="icon-btn" id="gear" title="设置后端地址" aria-label="设置">⚙</button>
+  </div>
+
+  <div class="sheet" id="sheet">
+    <div class="card">
+      <label for="apiInput">后端地址（Cloudflare Worker）</label>
+      <div class="row">
+        <input type="text" id="apiInput" placeholder="https://pixiv-viewer.xxx.workers.dev" autocomplete="off" spellcheck="false">
+        <button class="primary" id="saveApi" style="height:40px;padding:0 18px;font-size:13.5px">保存</button>
+      </div>
+      <p class="note">
+        必须配置后端才能取到图片 —— pixiv 图床强制校验 Referer，浏览器直连一律 403。<br>
+        地址会存在本地，下次打开自动生效；也可以用 <code>?api=</code> 参数指定。
+      </p>
+    </div>
+  </div>
+
+  <form class="search" id="form" autocomplete="off">
+    <input type="text" id="q" placeholder="82775556　/　115282819-2　/　https://www.pixiv.net/artworks/115282819" autofocus>
+    <button class="primary" type="submit" id="go">查询</button>
+  </form>
+
+  <p class="hint">支持纯 ID、<code>pid-2</code>（多图第 2 张）、pixiv 链接。按 <code>←</code> <code>→</code> 切换图片。</p>
+
+  <div class="status" id="status"></div>
+  <div id="result"></div>
+
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  var LS_KEY = "pixiv-viewer.apiBase";
+
+  var el = {
+    form: document.getElementById("form"),
+    q: document.getElementById("q"),
+    go: document.getElementById("go"),
+    status: document.getElementById("status"),
+    result: document.getElementById("result"),
+    sheet: document.getElementById("sheet"),
+    apiInput: document.getElementById("apiInput"),
+    saveApi: document.getElementById("saveApi"),
+    gear: document.getElementById("gear")
+  };
+
+  var state = {
+    apiBase: (localStorage.getItem(LS_KEY) || "").replace(/\/+$/, ""),
+    pid: null,
+    pageCount: 0,
+    viewing: 0,
+    original: [],   // 每页原图
+    regular: [],    // 每页 1200px 预览
+    small: [],      // 每页缩略图
+    title: "",
+    userName: "",
+    userId: "",
+    tags: [],
+    xRestrict: 0,
+    showOriginal: false
+  };
+
+  /* ---------- 工具 ---------- */
+
+  function setStatus(msg, kind){
+    if(!msg){ el.status.className = "status"; el.status.innerHTML = ""; return; }
+    el.status.className = "status show" + (kind ? " " + kind : "");
+    el.status.innerHTML = msg;
+  }
+
+  function esc(s){
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function(c){
+      return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];
+    });
+  }
+
+  function parseInput(raw){
+    var s = String(raw || "").trim();
+    if(!s) return null;
+
+    var m = s.match(/pixiv\.net\/(?:[a-z]{2}\/)?artworks\/(\d+)/i);
+    if(!m) m = s.match(/[?&]illust_id=(\d+)/i);
+    if(m) return { pid: m[1], page: 0 };
+
+    var n = s.match(/^(\d+)\s*[-_]\s*(\d+)$/);
+    if(n) return { pid: n[1], page: Math.max(0, parseInt(n[2], 10) - 1) };
+
+    var c = s.match(/^(\d+)\s*:\s*(\d+)$/);
+    if(c) return { pid: c[1], page: parseInt(c[2], 10) };
+
+    var p = s.match(/^(\d+)$/);
+    if(p) return { pid: p[1], page: 0 };
+
+    return null;
+  }
+
+  function proxy(u){
+    if(!u) return "";
+    if(!state.apiBase) return u;
+    return state.apiBase + "/img?u=" + encodeURIComponent(u);
+  }
+
+  /* ---------- 渲染 ---------- */
+
+  function renderMeta(){
+    var tags = state.tags.slice(0, 14).map(function(t){
+      return '<span class="tag">' + esc(t) + "</span>";
+    }).join("");
+    if(state.xRestrict === 1) tags = '<span class="tag r18">R-18</span>' + tags;
+    else if(state.xRestrict === 2) tags = '<span class="tag r18">R-18G</span>' + tags;
+
+    var multi = state.pageCount > 1;
+
+    el.result.innerHTML =
+      '<div class="card">' +
+        '<div class="stage" id="stage">' +
+          '<div class="spinner" id="spin"></div>' +
+          (multi
+            ? '<button class="nav prev" id="prev" aria-label="上一张">‹</button>' +
+              '<button class="nav next" id="next" aria-label="下一张">›</button>' +
+              '<div class="counter" id="counter"></div>'
+            : '') +
+        '</div>' +
+        (multi ? '<div class="thumbs" id="thumbs"></div>' : '') +
+        '<div class="meta">' +
+          '<h2 class="title">' + esc(state.title || "(无标题)") + "</h2>" +
+          '<p class="author">' +
+            (state.userId
+              ? '<a href="https://www.pixiv.net/users/' + esc(state.userId) + '" target="_blank" rel="noopener noreferrer">' + esc(state.userName) + "</a>"
+              : esc(state.userName)) +
+            (multi ? "　·　" + state.pageCount + " 张" : "") +
+          "</p>" +
+          (tags ? '<div class="tags">' + tags + "</div>" : "") +
+          '<div class="actions">' +
+            '<a href="https://www.pixiv.net/artworks/' + esc(state.pid) + '" target="_blank" rel="noopener noreferrer">在 Pixiv 打开</a>' +
+            '<button id="toggleOrig">查看原图</button>' +
+            '<button id="copyId">复制 ID</button>' +
+            '<a id="dlLink" href="#" target="_blank" rel="noopener noreferrer">下载</a>' +
+            '<span class="pid">当前 ID：<b id="pidText"></b></span>' +
+          "</div>" +
+        "</div>" +
+      "</div>";
+
+    var toggle = document.getElementById("toggleOrig");
+    toggle.onclick = function(){
+      state.showOriginal = !state.showOriginal;
+      toggle.textContent = state.showOriginal ? "看预览图" : "查看原图";
+      toggle.classList.toggle("on", state.showOriginal);
+      showPage(state.viewing);
+    };
+
+    document.getElementById("copyId").onclick = function(){
+      copy(state.pid + (state.pageCount > 1 ? "-" + (state.viewing + 1) : ""), this);
+    };
+
+    if(multi){
+      document.getElementById("prev").onclick = function(){ showPage(state.viewing - 1); };
+      document.getElementById("next").onclick = function(){ showPage(state.viewing + 1); };
+      buildThumbs();
+    }
+
+    showPage(state.viewing);
+  }
+
+  function buildThumbs(){
+    var box = document.getElementById("thumbs");
+    if(!box) return;
+    box.innerHTML = "";
+    for(var i = 0; i < state.pageCount; i++){
+      (function(i){
+        var im = document.createElement("img");
+        im.loading = "lazy";
+        im.alt = "第 " + (i + 1) + " 张";
+        im.src = proxy(state.small[i] || state.regular[i]);
+        if(i === state.viewing) im.className = "on";
+        im.onclick = function(){ showPage(i); };
+        im.onerror = function(){ this.style.visibility = "hidden"; };
+        box.appendChild(im);
+      })(i);
+    }
+  }
+
+  function currentPick(){
+    // showOriginal 时用原图，否则用 1200px 预览
+    var arr = state.showOriginal ? state.original : state.regular;
+    return arr[state.viewing] || state.original[state.viewing] || "";
+  }
+
+  function showPage(idx){
+    if(idx < 0) idx = 0;
+    if(idx > state.pageCount - 1) idx = state.pageCount - 1;
+    state.viewing = idx;
+
+    var stage = document.getElementById("stage");
+    if(!stage) return;
+
+    var old = stage.querySelector("img");
+    if(old) old.remove();
+
+    var spin = document.getElementById("spin");
+    if(spin) spin.style.display = "block";
+
+    var img = document.createElement("img");
+    img.alt = state.title || ("第 " + (idx + 1) + " 张");
+    img.decoding = "async";
+
+    img.onload = function(){ if(spin) spin.style.display = "none"; };
+    img.onerror = function(){
+      if(spin) spin.style.display = "none";
+      // 原图失败就退回预览图
+      if(state.showOriginal && state.regular[idx]){
+        img.onerror = null;
+        img.src = proxy(state.regular[idx]);
+        setStatus("原图加载失败，已回退到预览图。", "warn");
+        return;
+      }
+      setStatus("<b>图片加载失败。</b>后端可能不可用，或该作品图片有访问限制。", "err");
+    };
+
+    img.src = proxy(currentPick());
+    stage.appendChild(img);
+
+    var counter = document.getElementById("counter");
+    if(counter) counter.textContent = (idx + 1) + " / " + state.pageCount;
+
+    var prev = document.getElementById("prev");
+    var next = document.getElementById("next");
+    if(prev) prev.disabled = idx === 0;
+    if(next) next.disabled = idx === state.pageCount - 1;
+
+    var thumbs = document.querySelectorAll("#thumbs img");
+    for(var i = 0; i < thumbs.length; i++){
+      thumbs[i].classList.toggle("on", i === idx);
+    }
+
+    var pidText = document.getElementById("pidText");
+    if(pidText) pidText.textContent = state.pid + (state.pageCount > 1 ? "-" + (idx + 1) : "");
+
+    var dl = document.getElementById("dlLink");
+    if(dl) dl.href = proxy(state.original[idx] || "");
+  }
+
+  function copy(text, btn){
+    var restore = btn.textContent;
+    var done = function(){
+      btn.textContent = "已复制";
+      setTimeout(function(){ btn.textContent = restore; }, 1300);
+    };
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(done, function(){ fb(); });
+    } else { fb(); }
+
+    function fb(){
+      var ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); done(); } catch(e){}
+      ta.remove();
+    }
+  }
+
+  /* ---------- 主流程 ---------- */
+
+  function run(raw){
+    var parsed = parseInput(raw);
+    if(!parsed){
+      setStatus("无法识别的输入。请填纯数字 ID、<code>pid-页码</code>，或 pixiv 作品链接。", "err");
+      return;
+    }
+
+    if(!state.apiBase){
+      setStatus("还没有配置后端地址。点右上角 <b>⚙</b> 填入 Cloudflare Worker 地址后再查询。", "err");
+      return;
+    }
+
+    state.pid = parsed.pid;
+    el.result.innerHTML = "";
+    setStatus("正在查询作品 " + esc(parsed.pid) + " …");
+    el.go.disabled = true;
+
+    fetch(state.apiBase + "/api/illust/" + encodeURIComponent(parsed.pid), { cache: "no-store" })
+      .then(function(r){
+        return r.json().catch(function(){
+          throw new Error("后端返回了非 JSON（HTTP " + r.status + "）");
+        }).then(function(d){
+          if(!r.ok || d.error){
+            var e = new Error(d.message || ("HTTP " + r.status));
+            e.status = r.status;
+            e.notFound = d.notFound || r.status === 404;
+            throw e;
+          }
+          return d;
+        });
+      })
+      .then(function(d){
+        var b = d.body || {};
+        state.title = b.title || "";
+        state.userName = b.userName || "";
+        state.userId = b.userId || "";
+        state.xRestrict = b.xRestrict || 0;
+        state.pageCount = b.pageCount || 1;
+        state.tags = b.tags || [];
+        state.original = d.pages || [];
+        state.regular = d.regular || d.pages || [];
+        state.small = d.small || d.regular || [];
+
+        if(state.pageCount < 1) state.pageCount = 1;
+        state.viewing = Math.min(parsed.page, state.pageCount - 1);
+        if(state.viewing < 0) state.viewing = 0;
+
+        setStatus("");
+        renderMeta();
+      })
+      .catch(function(err){
+        var msg = String((err && err.message) || err);
+        if(err && err.notFound){
+          setStatus("<b>作品不存在。</b>ID <code>" + esc(parsed.pid) + "</code> 没有对应的 pixiv 作品，或已被删除。", "err");
+        } else {
+          setStatus("<b>查询失败：</b>" + esc(msg) + "。请确认后端地址可用。", "err");
+        }
+      })
+      .then(function(){ el.go.disabled = false; });
+  }
+
+  /* ---------- 事件 ---------- */
+
+  el.form.addEventListener("submit", function(e){
+    e.preventDefault();
+    run(el.q.value);
+  });
+
+  el.gear.addEventListener("click", function(){
+    el.apiInput.value = state.apiBase;
+    el.sheet.classList.toggle("show");
+  });
+
+  el.saveApi.addEventListener("click", function(){
+    var v = el.apiInput.value.trim().replace(/\/+$/, "");
+    state.apiBase = v;
+    if(v) localStorage.setItem(LS_KEY, v);
+    else localStorage.removeItem(LS_KEY);
+    el.sheet.classList.remove("show");
+    if(v){
+      setStatus("后端地址已保存。", "ok");
+      setTimeout(function(){ setStatus(""); }, 1600);
+      if(state.pid) run(el.q.value);
+    } else {
+      setStatus("");
+    }
+  });
+
+  document.addEventListener("keydown", function(e){
+    if(e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+    if(!state.pageCount || state.pageCount < 2) return;
+    if(e.key === "ArrowLeft") showPage(state.viewing - 1);
+    if(e.key === "ArrowRight") showPage(state.viewing + 1);
+  });
+
+  var params = new URLSearchParams(location.search);
+  if(params.get("api")){
+    state.apiBase = params.get("api").replace(/\/+$/, "");
+    localStorage.setItem(LS_KEY, state.apiBase);
+  }
+  if(params.get("q")){
+    el.q.value = params.get("q");
+    run(params.get("q"));
+  } else if(!state.apiBase){
+    setStatus("首次使用：点右上角 <b>⚙</b> 填入 Cloudflare Worker 地址。", "warn");
+  }
+})();
+</script>
+</body>
+</html>
