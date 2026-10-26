@@ -13,8 +13,12 @@
 | `/ajax/illust/{pid}` 未登录时 `urls` 全为 `null` | 拿不到图片地址 |
 | `/ajax/illust/{pid}/pages` 未登录**能拿到**完整地址 | 图片地址必须走这个接口 |
 | `uploadDate` 只精确到分钟，`pximg` 路径是秒级上传时间 | 实测差 31 秒，**不能自己推算路径** |
+| CF Worker 出口访问 `*.pixiv.net` 一律 **403** | 是 pixiv 边缘层按机房 IP 整域拦截，不是 cookie 问题（`app-api` 也 403） |
+| 同一出口访问 `i.pximg.net` **正常 200** | 图床和 API 分属不同边缘，只有 API 被封 |
 
 所以 Worker 干两件事：取元数据、带上伪装 Referer 转发图片。
+
+元数据这一步因为直连必 403，走 `r.jina.ai` 中继（出口不是 Cloudflare）。图片不吃中继额度，仍由 Worker 直接取。
 
 ## 部署
 
@@ -35,13 +39,16 @@ npx wrangler deploy
 
 仓库里已有 `wrangler.toml`，无需额外配置。
 
-可选：如果取图返回 403 或"非 JSON"（出口 IP 被风控），给 Worker 加一个 Secret：
+可选：给 Worker 加一个 Secret `JINA_KEY`（[jina.ai/reader](https://jina.ai/reader) 免费申请）。
+
+不加也能跑，但中继免费额度是 **20 次/分**，API 结果缓存 10 分钟；加上可提到 200 次/分。
 
 ```bash
-npx wrangler secret put PIXIV_COOKIE
+npx wrangler secret put JINA_KEY
 ```
 
-值填浏览器里 pixiv 的完整 Cookie 串。
+> `PIXIV_COOKIE` 那条老办法**没用**，别试了。实测带 cookie、不带 cookie、原始串、
+> 移动端 UA 四种策略在 CF 出口全是 403，连不看 cookie 的 `app-api.pixiv.net` 也是 403。
 
 ### 2. 前端（任选其一）
 
@@ -86,7 +93,8 @@ https://www.pixiv.net/artworks/115282819   pixiv 链接
 
 - **必须能访问 `workers.dev`**。大陆网络环境下这个域名经常不可用，建议给 Worker 绑自定义域名，或走代理。
 - **动图（うごイラ）不支持**，只显示首帧。
-- 未配置 `PIXIV_COOKIE` 时，部分作品（尤其是 R-18）可能取不到图。
+- **元数据依赖 `r.jina.ai`**。免费额度 20 次/分，超出会返回 429；配 `JINA_KEY` 可提到 200 次/分。结果缓存 10 分钟，正常个人使用碰不到上限。
+- **首次查询约 1 秒**（中继往返），命中缓存后是毫秒级。
 - Worker 免费额度是每天 10 万次请求，个人用绰绰有余。图片走 Cloudflare 缓存，重复查看不消耗回源。
 
 ## 本地调试
